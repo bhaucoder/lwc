@@ -1,0 +1,103 @@
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+APEX CLASS
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+public class LwcContactOperations {
+    
+    @AuraEnabled
+    public static void updateInterviewwChanges(String contactRecordId, String name, String email) {
+        Contact con = [SELECT Id, Interviewee_Name__c, Interviewee_Email__c FROM Contact WHERE Id=:contactRecordId][0];
+        if(con!=null) {
+            con.Interviewee_Name__c = name;
+            con.Interviewee_Email__c = email;
+            update con;
+        }
+    }
+}
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+HTML
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+<template>
+    <!-- First Way -->
+    <div style="background-color: white;padding: 10px;">
+        <div>
+            <lightning-input type="text" label="Interviewee Name" onchange={handleIntervieweeNameChange}></lightning-input>
+        </div>
+        <div>
+            <lightning-input type="email" label="Interviewee Email" onchange={handleIntervieweeEmailChange}></lightning-input>
+        </div>
+        <div>
+            <lightning-button label="Update Details" onclick={updateIntrevieweeDetails}></lightning-button>
+        </div>
+    </div>
+
+    <!-- Second Way -->
+    <div style="background-color: #101C3C;padding: 10px;">
+        <lightning-record-edit-form record-id={recordId} object-api-name="Contact" 
+            onsubmit={handleUpdateIntervieweeDetailsSubmit} onsuccess={handleUpdateIntervieweeDetailsSuccess} density="comfy">
+            <div class="slds-col slds-size_12-of-12">
+                <span style="color: #98F0A8;">Interviewee Name</span>
+            </div>
+            <div class="slds-col slds-size_12-of-12">
+                <lightning-input-field variant="label-hidden" field-name="Interviewee_Name__c"></lightning-input-field>
+            </div>
+            <div class="slds-col slds-size_12-of-12">
+                <span style="color: #98F0A8;">Interviewee Email</span>
+            </div>
+            <div class="slds-col slds-size_12-of-12">
+                <lightning-input-field variant="label-hidden" field-name="Interviewee_Email__c"></lightning-input-field>
+            </div>
+            <div>
+                <lightning-button variant="brand" class="slds-m-left_x-small" label="Update Details" type="submit"></lightning-button>
+            </div>
+        </lightning-record-edit-form>
+    </div>
+</template>
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+JS
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+import { LightningElement, api } from 'lwc';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import updateContact from '@salesforce/apex/LwcContactOperations.updateInterviewwChanges';
+
+export default class UpdateFeldsOnContact extends LightningElement {
+    @api recordId;
+
+    intervieweeName;
+    handleIntervieweeNameChange(event) {
+        this.intervieweeName = event.target.value;
+    }
+
+    intervieweeEmail;
+    handleIntervieweeEmailChange(event) {
+        this.intervieweeEmail = event.target.value;
+    }
+
+    updateIntrevieweeDetails() {
+        updateContact({contactRecordId: this.recordId, name: this.intervieweeName, email: this.intervieweeEmail})
+        .then((result) => {
+            if(result) {
+                const evt = new ShowToastEvent({
+                    variant: 'success',
+                    title: 'Success!',
+                    message: 'Contact Record has been Updated',
+                });
+                this.dispatchEvent(evt);
+            }
+        }).catch((error) => {
+            console.log(error);
+        });
+    }
+
+    handleUpdateIntervieweeDetailsSubmit() {}
+
+    handleUpdateIntervieweeDetailsSuccess() {
+        const evt = new ShowToastEvent({
+            variant: 'success',
+            title: 'Success!',
+            message: 'Contact Record has been Updated',
+        });
+        this.dispatchEvent(evt);
+    }
+}
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
