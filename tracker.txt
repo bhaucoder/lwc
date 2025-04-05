@@ -1,0 +1,1042 @@
+--------------------------------------------------------------------------------------------------------------------------------------
+APEX CLASS
+--------------------------------------------------------------------------------------------------------------------------------------
+public class Tracker {
+    
+    @AuraEnabled
+    public static List<TrackerWrapper> currentCalendarMonthTrackers(String currentMonth) {
+        Date firstDayOfCurrentMonth = Date.valueOf(currentMonth);
+        Date firstDayOfNextMonth = firstDayOfCurrentMonth.addMonths(1);
+        DateTime dtC = DateTime.newInstance(firstDayOfCurrentMonth.year(), firstDayOfCurrentMonth.month(),firstDayOfCurrentMonth.day());
+        DateTime dtN = DateTime.newInstance(firstDayOfNextMonth.year(), firstDayOfNextMonth.month(),firstDayOfNextMonth.day());
+        
+        List<Tracker__c> trackers = 
+            [SELECT Id, Name, Label__c, EventStartTime__c, EventEndTime__c, Description__c, AdditionalInfo__c, ReminderRequired__c, ReminderType__c, EventStatus__c, DueDate__c, CreatedBy.Name 
+             FROM Tracker__c
+             WHERE (EventStartTime__c >= :dtC AND EventStartTime__c < :dtN) OR (EventEndTime__c >= :dtC AND EventEndTime__c < :dtN)];
+        List<TrackerWrapper> trackerWrappers = new List<TrackerWrapper>();
+        
+        for(Tracker__c tracker:trackers) {
+            TrackerWrapper trackerWrapper = new TrackerWrapper();
+            trackerWrapper.trackerId = tracker.Id;
+            trackerWrapper.trackerLabel = tracker.Label__c;
+          
+            String trackerStartDateTime = String.valueOf(tracker.EventStartTime__c);
+            trackerWrapper.trackerStartDate = String.valueOf(Integer.valueOf((trackerStartDateTime.split(' ')[0]).split('-')[2]));
+            String trackerST = (trackerStartDateTime.split(' ')[1]);
+            trackerWrapper.trackerStartTime =  trackerST.substring(0, trackerST.lastIndexOf(':'));
+            String trackerEndDateTime = String.valueOf(tracker.EventEndTime__c);
+            trackerWrapper.trackerEndDate = String.valueOf(Integer.valueOf((trackerEndDateTime.split(' ')[0]).split('-')[2]));
+            String trackerET = (trackerEndDateTime.split(' ')[1]);
+            trackerWrapper.trackerEndTime = trackerET.substring(0, trackerET.lastIndexOf(':'));
+            
+            trackerWrapper.trackerStatus = tracker.EventStatus__c;
+            String statusColor ='';
+            if(tracker.EventStatus__c=='Open') {  
+                statusColor = 'background-color: #00BFFF;';
+            } else if(tracker.EventStatus__c=='In Progress') {
+                statusColor = 'background-color: #FF8C00;';
+            } else if(tracker.EventStatus__c=='Cancelled') {
+                statusColor = 'background-color: #FF6347;';
+            } else if(tracker.EventStatus__c=='Completed') {
+                statusColor = 'background-color: #3CB371;';
+            }
+            trackerWrapper.trackerStatusColor = statusColor;
+            
+            trackerWrappers.add(trackerWrapper);
+        }
+        return trackerWrappers;
+    }
+    
+    public class TrackerWrapper {
+        @AuraEnabled public String trackerId;
+        @AuraEnabled public String trackerLabel;
+        @AuraEnabled public String trackerStartDate;
+        @AuraEnabled public String trackerEndDate;
+        @AuraEnabled public String trackerStartTime;
+        @AuraEnabled public String trackerEndTime;
+        @AuraEnabled public String trackerStatus;
+        @AuraEnabled public String trackerStatusColor;
+    }
+    
+    @AuraEnabled
+    public static String createNewTracker(String tracker) {
+        Map<String,Object> parsedTracker = new Map<String,Object>();
+        parsedTracker = (Map<String,Object>) JSON.deserializeUntyped(tracker);
+        Tracker__c newTracker = new Tracker__c();
+        if(parsedTracker !=NULL) {
+            newTracker.Label__c = String.valueOf(parsedTracker.get('label'));
+            newTracker.EventStartTime__c = DateTime.valueOf(String.valueOf(parsedTracker.get('startTime')).replace('T',' '));
+            newTracker.EventEndTime__c = DateTime.valueOf(String.valueOf(parsedTracker.get('endTime')).replace('T',' '));
+            newTracker.Description__c = String.valueOf(parsedTracker.get('description'));
+            newTracker.AdditionalInfo__c = String.valueOf(parsedTracker.get('additionalInfo'));
+            if(String.valueOf(parsedTracker.get('reminder')) !=NULL) {
+                newTracker.ReminderRequired__c = Boolean.valueOf(parsedTracker.get('reminder'));
+            }
+            newTracker.ReminderType__c = String.valueOf(parsedTracker.get('reminderType'));
+            try{
+                insert newTracker;
+            } catch(DMLException e) {
+                throw new DMLException(e.getDmlMessage(0));
+            }
+        }
+        return String.valueOf(newTracker.Id);
+    }
+}
+--------------------------------------------------------------------------------------------------------------------------------------
+HTML
+--------------------------------------------------------------------------------------------------------------------------------------
+<template>
+    <!-- Spinner -->
+    <template if:true={isLoading}>
+        <lightning-spinner variant="brand" size="medium"> </lightning-spinner>    
+    </template>
+    <div class="outer" style="background-color: #101C3C;color: white;padding: 1rem;min-width: 100%;max-width: 100%;min-height: 100%;max-height: 100%;"> <!-- NEON COLOR CODE for TEXT 98F0A8 -->
+        <div class="headingBar">
+            <div class="leftIcon slds-align_absolute-center"><lightning-button-icon size="large" variant="bare" icon-name="utility:left" onclick={handlePreviousMonth}></lightning-button-icon></div>
+            <div class="currentMonth slds-align_absolute-center">
+                <div style="min-height: 75% !important;max-height: 75% !important;" class="slds-align_absolute-center"><lightning-formatted-text value={currentMonthInText}></lightning-formatted-text></div>
+            </div>
+            <div class="rightIcon slds-align_absolute-center"><lightning-button-icon size="large" variant="bare" icon-name="utility:right" onclick={handleNextMonth}></lightning-button-icon></div>
+            <div class="minusIcon slds-align_absolute-center"><lightning-button-icon size="large" variant="bare" icon-name="utility:down" onclick={handlePreviousYear}></lightning-button-icon></div>
+            <div class="currentYear slds-align_absolute-center">
+                <div style="min-height: 75% !important;max-height: 75% !important;" class="slds-align_absolute-center"><lightning-formatted-text value={currentYearInText}></lightning-formatted-text></div>
+            </div>
+            <div class="plusIcon slds-align_absolute-center"><lightning-button-icon size="large" variant="bare" icon-name="utility:up" onclick={handleNextYear}></lightning-button-icon></div>
+            <div class="loadCalendarButton slds-align_absolute-center">
+                <lightning-button stretch class="loadButton" variant="brand" label="LOAD CALENDAR" onclick={loadNewCalendar}></lightning-button>
+            </div>
+        </div>
+        <div class="calendar" style="border: 1px solid #E7E7E7;">
+            <div class="slds-align_absolute-center sun">SUN</div>
+            <div class="slds-align_absolute-center mon">MON</div>
+            <div class="slds-align_absolute-center tue">TUE</div>
+            <div class="slds-align_absolute-center wed">WED</div>
+            <div class="slds-align_absolute-center thu">THU</div>
+            <div class="slds-align_absolute-center fri">FRI</div>
+            <div class="slds-align_absolute-center sat">SAT</div>
+            <div class="slds-align_absolute-center m00" data-id={cc00}><a onclick={handleDayClick} id={cc00}>{cc00}</a></div>
+            <div class="slds-align_absolute-center m01" data-id={cc01}><a onclick={handleDayClick} id={cc01}>{cc01}</a></div>
+            <div class="slds-align_absolute-center m02" data-id={cc02}><a onclick={handleDayClick} id={cc02}>{cc02}</a></div>
+            <div class="slds-align_absolute-center m03" data-id={cc03}><a onclick={handleDayClick} id={cc03}>{cc03}</a></div>
+            <div class="slds-align_absolute-center m04" data-id={cc04}><a onclick={handleDayClick} id={cc04}>{cc04}</a></div>
+            <div class="slds-align_absolute-center m05" data-id={cc05}><a onclick={handleDayClick} id={cc05}>{cc05}</a></div>
+            <div class="slds-align_absolute-center m06" data-id={cc06}><a onclick={handleDayClick} id={cc06}>{cc06}</a></div>
+            <div class="slds-align_absolute-center m10" data-id={cc10}><a onclick={handleDayClick} id={cc10}>{cc10}</a></div>
+            <div class="slds-align_absolute-center m11" data-id={cc11}><a onclick={handleDayClick} id={cc11}>{cc11}</a></div>
+            <div class="slds-align_absolute-center m12" data-id={cc12}><a onclick={handleDayClick} id={cc12}>{cc12}</a></div>
+            <div class="slds-align_absolute-center m13" data-id={cc13}><a onclick={handleDayClick} id={cc13}>{cc13}</a></div>
+            <div class="slds-align_absolute-center m14" data-id={cc14}><a onclick={handleDayClick} id={cc14}>{cc14}</a></div>
+            <div class="slds-align_absolute-center m15" data-id={cc15}><a onclick={handleDayClick} id={cc15}>{cc15}</a></div>
+            <div class="slds-align_absolute-center m16" data-id={cc16}><a onclick={handleDayClick} id={cc16}>{cc16}</a></div>
+            <div class="slds-align_absolute-center m20" data-id={cc20}><a onclick={handleDayClick} id={cc20}>{cc20}</a></div>
+            <div class="slds-align_absolute-center m21" data-id={cc21}><a onclick={handleDayClick} id={cc21}>{cc21}</a></div>
+            <div class="slds-align_absolute-center m22" data-id={cc22}><a onclick={handleDayClick} id={cc22}>{cc22}</a></div>
+            <div class="slds-align_absolute-center m23" data-id={cc23}><a onclick={handleDayClick} id={cc23}>{cc23}</a></div>
+            <div class="slds-align_absolute-center m24" data-id={cc24}><a onclick={handleDayClick} id={cc24}>{cc24}</a></div>
+            <div class="slds-align_absolute-center m25" data-id={cc25}><a onclick={handleDayClick} id={cc25}>{cc25}</a></div>
+            <div class="slds-align_absolute-center m26" data-id={cc26}><a onclick={handleDayClick} id={cc26}>{cc26}</a></div>
+            <div class="slds-align_absolute-center m30" data-id={cc30}><a onclick={handleDayClick} id={cc30}>{cc30}</a></div>
+            <div class="slds-align_absolute-center m31" data-id={cc31}><a onclick={handleDayClick} id={cc31}>{cc31}</a></div>
+            <div class="slds-align_absolute-center m32" data-id={cc32}><a onclick={handleDayClick} id={cc32}>{cc32}</a></div>
+            <div class="slds-align_absolute-center m33" data-id={cc33}><a onclick={handleDayClick} id={cc33}>{cc33}</a></div>
+            <div class="slds-align_absolute-center m34" data-id={cc34}><a onclick={handleDayClick} id={cc34}>{cc34}</a></div>
+            <div class="slds-align_absolute-center m35" data-id={cc35}><a onclick={handleDayClick} id={cc35}>{cc35}</a></div>
+            <div class="slds-align_absolute-center m36" data-id={cc36}><a onclick={handleDayClick} id={cc36}>{cc36}</a></div>
+            <div class="slds-align_absolute-center m40" data-id={cc40}><a onclick={handleDayClick} id={cc40}>{cc40}</a></div>
+            <div class="slds-align_absolute-center m41" data-id={cc41}><a onclick={handleDayClick} id={cc41}>{cc41}</a></div>
+            <div class="slds-align_absolute-center m42" data-id={cc42}><a onclick={handleDayClick} id={cc42}>{cc42}</a></div>
+            <div class="slds-align_absolute-center m43" data-id={cc43}><a onclick={handleDayClick} id={cc43}>{cc43}</a></div>
+            <div class="slds-align_absolute-center m44" data-id={cc44}><a onclick={handleDayClick} id={cc44}>{cc44}</a></div>
+            <div class="slds-align_absolute-center m45" data-id={cc45}><a onclick={handleDayClick} id={cc45}>{cc45}</a></div>
+            <div class="slds-align_absolute-center m46" data-id={cc46}><a onclick={handleDayClick} id={cc46}>{cc46}</a></div>
+        </div>
+        <div if:false={createNewEvent} class="selectedDate">
+            <div class="selectedDateHighlightedPanel">
+                <div if:true={eventsAreThereForSelectedDay} class="shortSelectedDay">
+                    {selectedDay}
+                </div>
+                <div class="addTrackerButton">
+                    <lightning-button-icon size="medium" variant="border-filled" icon-name="utility:add" onclick={addTracker}></lightning-button-icon>
+                </div>
+            </div>
+            <div if:false={eventsAreThereForSelectedDay} class="slds-align_absolute-center fullWidthAndHeight">
+                <div class="" style="font-size: 255px;color: #98F0A8;">{selectedDay}</div>
+            </div>
+            <div if:true={eventsAreThereForSelectedDay} class="fullWidthAndHeight">
+                <div>
+                    <div style="padding-left: 10px;padding-top: 10px;">
+                        <table>
+                            <tbody>
+                                <template for:each={selectedDayEvents} for:item="selectedDayEvent">
+                                    <tr key={selectedDayEvent.trackerId}> <!-- height="30px" -->
+                                        <td class="slds-align_absolute-center tableDataStatusStyling" style={selectedDayEvent.trackerStatusColor}> {selectedDayEvent.trackerStatus} </td>
+                                        <td style="padding-left: 5px;width: 25%;height: 25px;"> {selectedDayEvent.trackerStartTime} to {selectedDayEvent.trackerEndTime} </td> <!-- class="slds-align_absolute-center" -->
+                                        <td style="padding-left: 5px;width: 55%;height: 25px;"> {selectedDayEvent.trackerLabel} </td> <!-- class="slds-align_absolute-center" -->
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div if:true={createNewEvent} class="newEvent" style="padding: 15px;"> <!-- background-color: #0D98BA; -->
+            <div class="heading slds-align_absolute-center">
+                <h2>CREATE NEW EVENT</h2>
+            </div>
+            <div class="labelLabel">
+				<lightning-formatted-text style="color: #98F0A8;" value="Label"></lightning-formatted-text>
+			</div>
+            <div class="eventLabel">
+                <lightning-input type="text" variant="label-hidden" onchange={handleLabelChange} required="true" value={labelValue}></lightning-input>
+            </div>
+            <div class="labelStart">
+				<lightning-formatted-text style="color: #98F0A8;" value="Start"></lightning-formatted-text>
+			</div>
+            <div class="eventStartDateTime">
+                <lightning-input type="datetime" date-style="short" variant="label-hidden" value={eventStartTimeValue} onchange={handleEventStartTimeChange}> </lightning-input>
+            </div>
+            <div class="labelEnd">
+				<lightning-formatted-text style="color: #98F0A8;" value="End"></lightning-formatted-text>
+			</div>
+            <div class="eventEndDateTime">
+                <lightning-input type="datetime" date-style="short" variant="label-hidden" value={eventEndTimeValue} onchange={handleEventEndTimeChange}> </lightning-input>
+            </div>
+            <div class="labelDescription">
+				<lightning-formatted-text style="color: #98F0A8;" value="Description"></lightning-formatted-text>
+			</div>
+            <div class="eventDescription">
+                <lightning-textarea variant="label-hidden" onchange={handleDescriptionChange} value={descriptionValue}></lightning-textarea>
+            </div>
+            <div class="labelAdditionalInfo">
+				<lightning-formatted-text style="color: #98F0A8;" value="Additional Info"></lightning-formatted-text>
+			</div>
+            <div class="eventAdditionalInfo">
+                <lightning-textarea variant="label-hidden" onchange={handleAdditionalInfoChange} value={additionalInfoValue}></lightning-textarea>
+            </div>
+            <div class="labelReminder">
+				<lightning-formatted-text style="color: #98F0A8;" value="Required Reminder"></lightning-formatted-text>
+			</div>
+            <div class="eventReminder">
+                <lightning-input type="checkbox" variant="label-hidden" label="Required Reminder" onchange={handleReminderChange} checked={reminderValue}></lightning-input>
+            </div>
+            <div class="labelReminderType">
+				<lightning-formatted-text style="color: #98F0A8;" value="Reminder Type"></lightning-formatted-text>
+			</div>
+            <div class="eventReminderType">
+                <lightning-combobox variant="label-hidden" label="Reminder Type" options={reminderTypeOptions} value={reminderTypeValue} onchange={handleReminderTypeChange}></lightning-combobox>
+            </div>
+            <div class="cancelButtons">
+                <lightning-button class="buttonStyle" stretch variant="brand" label="Cancel" onclick={handleEventCancel}></lightning-button>
+            </div>
+            <div class="createButtons">
+                <lightning-button class="buttonStyle" stretch variant="brand" label="Create" onclick={handleEventCreate} disabled={createEventButtonDisabled}></lightning-button>
+            </div>
+        </div>
+    </div>
+</template>
+--------------------------------------------------------------------------------------------------------------------------------------
+JS
+--------------------------------------------------------------------------------------------------------------------------------------
+import { LightningElement, wire } from 'lwc';
+import { getObjectInfo } from 'lightning/uiObjectInfoApi';
+import { getPicklistValues } from 'lightning/uiObjectInfoApi';
+import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import TrackerObject from '@salesforce/schema/Tracker__c';
+import ReminderType from '@salesforce/schema/Tracker__c.ReminderType__c';
+import currentMonthTrackers from '@salesforce/apex/Tracker.currentCalendarMonthTrackers';
+import newTracker from '@salesforce/apex/Tracker.createNewTracker';
+
+export default class Tracker extends LightningElement {
+    currentCalendar =[
+        ['','','','','','',''],
+        ['','','','','','',''],
+        ['','','','','','',''],
+        ['','','','','','',''],
+        ['','','','','','',''],
+    ];
+
+    cc00;
+    cc01;
+    cc02;
+    cc03;
+    cc04;
+    cc05;
+    cc06;
+    cc10;
+    cc11;
+    cc12;
+    cc13;
+    cc14;
+    cc15;
+    cc16;
+    cc20;
+    cc21;
+    cc22;
+    cc23;
+    cc24;
+    cc25;
+    cc26;
+    cc30;
+    cc31;
+    cc32;
+    cc33;
+    cc34;
+    cc35;
+    cc36;
+    cc40;
+    cc41;
+    cc42;
+    cc43;
+    cc44;
+    cc45;
+    cc46;
+
+    isLoading =false;
+    currentYear;
+    currentYearInText;
+    currentMonthInText;
+    currentMonthInNumber;
+    firstDayOfTheWeekOfCurrentMonth;
+    todaysDay;
+    todaysDayOfTheWeek;
+    numberofDayInThisMonth;
+    selectedDay;
+    eventsAreThereForSelectedDay =false;
+    createEventButtonDisabled =true;
+    
+    @wire(getObjectInfo, { objectApiName: TrackerObject })
+    trackerObjectInfo;
+    
+    reminderTypeOptions;
+    @wire(getPicklistValues, {recordTypeId: '$trackerObjectInfo.data.defaultRecordTypeId', fieldApiName: ReminderType })
+    reminderTypeInfo({ data, error }) {
+        if (data) {
+            this.reminderTypeOptions = data.values;
+        }
+    }
+
+    handlePreviousMonth() {
+        if(this.currentMonthInNumber===0) {
+            this.currentMonthInNumber = 10;
+        }
+        this.currentMonthInNumber = this.currentMonthInNumber-1;
+        this.currentMonthInText = this.monthName(this.currentMonthInNumber);
+    }
+    handleNextMonth() {
+        if(this.currentMonthInNumber===11) {
+            this.currentMonthInNumber = -1;
+        }
+        this.currentMonthInNumber = this.currentMonthInNumber+1;
+        this.currentMonthInText = this.monthName(this.currentMonthInNumber);
+    }
+    handlePreviousYear() {
+        this.currentYear = this.currentYear - 1;
+        this.currentYearInText = this.currentYear.toString();
+    }
+    handleNextYear() {
+        this.currentYear = this.currentYear + 1;
+        this.currentYearInText = this.currentYear.toString();
+    }
+
+    loadNewCalendar() {
+        this.currentCalendar =[
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+        ];
+        this.selectedDay ='';
+        this.selectedDayEvents =[];
+        // CLEAR ALL THE PREVIOUSLY ADDED CLASS
+        let allDivElements = this.template.querySelectorAll('div[data-id]');
+        allDivElements.forEach(element => element.classList.remove('highlightDay'));
+        // CLEAR ALL THE PREVIOUSLY ADDED CLASS
+
+        this.firstDayOfTheWeekOfCurrentMonth = this.firstDayOfTheFirstWeek((new Date(this.currentYear, this.currentMonthInNumber, 1)).toString().split(' ')[0]);
+        this.numberofDayInThisMonth = this.daysInMonth(this.currentMonthInNumber+1,this.currentYear);
+        this.creatingThisMonthsCalendar(this.firstDayOfTheWeekOfCurrentMonth,this.numberofDayInThisMonth);
+
+        this.cc00 = this.currentCalendar[0][0];
+        this.cc01 = this.currentCalendar[0][1];
+        this.cc02 = this.currentCalendar[0][2];
+        this.cc03 = this.currentCalendar[0][3];
+        this.cc04 = this.currentCalendar[0][4];
+        this.cc05 = this.currentCalendar[0][5];
+        this.cc06 = this.currentCalendar[0][6];
+        this.cc10 = this.currentCalendar[1][0];
+        this.cc11 = this.currentCalendar[1][1];
+        this.cc12 = this.currentCalendar[1][2];
+        this.cc13 = this.currentCalendar[1][3];
+        this.cc14 = this.currentCalendar[1][4];
+        this.cc15 = this.currentCalendar[1][5];
+        this.cc16 = this.currentCalendar[1][6];
+        this.cc20 = this.currentCalendar[2][0];
+        this.cc21 = this.currentCalendar[2][1];
+        this.cc22 = this.currentCalendar[2][2];
+        this.cc23 = this.currentCalendar[2][3];
+        this.cc24 = this.currentCalendar[2][4];
+        this.cc25 = this.currentCalendar[2][5];
+        this.cc26 = this.currentCalendar[2][6];
+        this.cc30 = this.currentCalendar[3][0];
+        this.cc31 = this.currentCalendar[3][1];
+        this.cc32 = this.currentCalendar[3][2];
+        this.cc33 = this.currentCalendar[3][3];
+        this.cc34 = this.currentCalendar[3][4];
+        this.cc35 = this.currentCalendar[3][5];
+        this.cc36 = this.currentCalendar[3][6];
+        this.cc40 = this.currentCalendar[4][0];
+        this.cc41 = this.currentCalendar[4][1];
+        this.cc42 = this.currentCalendar[4][2];
+        this.cc43 = this.currentCalendar[4][3];
+        this.cc44 = this.currentCalendar[4][4];
+        this.cc45 = this.currentCalendar[4][5];
+        this.cc46 = this.currentCalendar[4][6];
+
+        this.loadCurrentMonthTrackers();
+    }
+
+    currentMonthTrackerList = [];
+    loadCurrentMonthTrackers() {
+        this.currentMonthTrackerList =[];
+        let firstDayOfCurrentMonth = (this.currentYear + '-' + (((this.currentMonthInNumber+1).toString().length === 1) ? ('0'+ (this.currentMonthInNumber+1).toString()) : this.currentMonthInNumber+1) + '-' +'01').toString();
+        
+        currentMonthTrackers({currentMonth: firstDayOfCurrentMonth})
+        .then(result => {
+            if(result) {
+                this.currentMonthTrackerList = result;            
+            }
+        })
+        .catch(error => {
+            console.log(error);
+        })
+    }
+
+    connectedCallback() {
+        this.currentYear = new Date().getFullYear();
+        this.currentYearInText = this.currentYear.toString();
+        this.currentMonthInNumber = (new Date().getMonth());
+        this.currentMonthInText = this.monthName((new Date().getMonth()));
+        this.todaysDay = new Date().getDate();
+
+        this.firstDayOfTheWeekOfCurrentMonth = this.firstDayOfTheFirstWeek((new Date(new Date().getFullYear(), new Date().getMonth(), 1)).toString().split(' ')[0]);
+        //console.log('FIRST DAY OF THE WEEK '+this.firstDayOfTheWeekOfCurrentMonth);
+        this.numberofDayInThisMonth = this.daysInMonth(this.currentMonthInNumber+1,this.currentYear);
+        
+        this.creatingThisMonthsCalendar(this.firstDayOfTheWeekOfCurrentMonth,this.numberofDayInThisMonth);
+        
+        this.cc00 = this.currentCalendar[0][0];
+        this.cc01 = this.currentCalendar[0][1];
+        this.cc02 = this.currentCalendar[0][2];
+        this.cc03 = this.currentCalendar[0][3];
+        this.cc04 = this.currentCalendar[0][4];
+        this.cc05 = this.currentCalendar[0][5];
+        this.cc06 = this.currentCalendar[0][6];
+        this.cc10 = this.currentCalendar[1][0];
+        this.cc11 = this.currentCalendar[1][1];
+        this.cc12 = this.currentCalendar[1][2];
+        this.cc13 = this.currentCalendar[1][3];
+        this.cc14 = this.currentCalendar[1][4];
+        this.cc15 = this.currentCalendar[1][5];
+        this.cc16 = this.currentCalendar[1][6];
+        this.cc20 = this.currentCalendar[2][0];
+        this.cc21 = this.currentCalendar[2][1];
+        this.cc22 = this.currentCalendar[2][2];
+        this.cc23 = this.currentCalendar[2][3];
+        this.cc24 = this.currentCalendar[2][4];
+        this.cc25 = this.currentCalendar[2][5];
+        this.cc26 = this.currentCalendar[2][6];
+        this.cc30 = this.currentCalendar[3][0];
+        this.cc31 = this.currentCalendar[3][1];
+        this.cc32 = this.currentCalendar[3][2];
+        this.cc33 = this.currentCalendar[3][3];
+        this.cc34 = this.currentCalendar[3][4];
+        this.cc35 = this.currentCalendar[3][5];
+        this.cc36 = this.currentCalendar[3][6];
+        this.cc40 = this.currentCalendar[4][0];
+        this.cc41 = this.currentCalendar[4][1];
+        this.cc42 = this.currentCalendar[4][2];
+        this.cc43 = this.currentCalendar[4][3];
+        this.cc44 = this.currentCalendar[4][4];
+        this.cc45 = this.currentCalendar[4][5];
+        this.cc46 = this.currentCalendar[4][6];
+
+        setTimeout(() => {
+             // HIGHTLIGHT CURRENT DAY
+            let todaysString = "div[data-id=\""+this.todaysDay+"\"]";
+            let todays = this.template.querySelector(todaysString);
+            todays.classList.add('highlightDay');
+            this.selectedDay = this.todaysDay;
+            // HIGHTLIGHT CURRENT DAY
+            this.loadCurrentMonthTrackers();
+            this.fetchselectedDayEvents();
+        }, 1500); 
+    }
+
+    selectedDayEvents =[];
+    fetchselectedDayEvents() {
+        this.eventsAreThereForSelectedDay =false;
+        this.selectedDayEvents =[];
+        this.selectedDayEvents = this.currentMonthTrackerList.filter((day) => (this.selectedDay >= day.trackerStartDate && this.selectedDay <= day.trackerEndDate));
+        if(this.selectedDayEvents.length >0) {
+            this.eventsAreThereForSelectedDay = true;
+        }
+    }
+
+    handleDayClick(event) {
+        // CLEAR ALL THE PREVIOUSLY ADDED CLASS
+        let allDivElements = this.template.querySelectorAll('div[data-id]');
+        allDivElements.forEach(element => element.classList.remove('highlightDay'));
+        // CLEAR ALL THE PREVIOUSLY ADDED CLASS
+
+        let daySelected = event.target.id;
+        let querySelectorString = "div[data-id=\""+daySelected.split('-')[0]+"\"]";
+        let selectedDayElement = this.template.querySelector(querySelectorString);
+        selectedDayElement.classList.add('highlightDay');
+        if(daySelected!==undefined) {
+            this.selectedDay = daySelected.split('-')[0];
+        }
+        this.fetchselectedDayEvents();
+    }
+
+    monthName(monthNumber) {
+        const month = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+        return month[monthNumber];
+    }
+
+    firstDayOfTheFirstWeek(nameOfTheDay) {
+        const daysOfTheWeek = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+        return daysOfTheWeek.indexOf(nameOfTheDay.toUpperCase());
+    }
+
+    daysInMonth(month, year) {
+        return new Date(year, month, 0).getDate();
+    }
+
+    creatingThisMonthsCalendar(firstDay,numberOfDays) {
+        this.currentCalendar =[
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+            ['','','','','','',''],
+        ];
+
+        let startDay = 1;
+        let columnNumber = firstDay;
+        for(var a=columnNumber; a<=6; a++) {
+            this.currentCalendar[0][a] = startDay.toString();
+            startDay++;
+        }
+        for(var r=1; r<5; r++) {
+            for(var c=0; c<7; c++) {
+                this.currentCalendar[r][c] = startDay.toString();
+                if(startDay===numberOfDays) {
+                    break;    
+                }
+                startDay++;
+            }
+        }
+    }
+
+    createNewEvent =false;
+    addTracker() {
+        this.createNewEvent =true;
+    }
+
+    labelValue;
+    handleLabelChange(event) {
+        this.labelValue = event.target.value;
+        this.enableCreateEventButton();
+    }
+
+    eventStartTimeValue;
+    handleEventStartTimeChange(event) {
+        this.eventStartTimeValue = event.target.value;
+        this.enableCreateEventButton();
+    }
+
+    eventEndTimeValue;
+    handleEventEndTimeChange(event) {
+        this.eventEndTimeValue = event.target.value;
+        this.enableCreateEventButton();
+    }
+
+    descriptionValue;
+    handleDescriptionChange(event) {
+        this.descriptionValue = event.target.value;
+    }
+
+    additionalInfoValue;
+    handleAdditionalInfoChange(event) {
+        this.additionalInfoValue = event.target.value;
+    }
+
+    reminderValue;
+    handleReminderChange(event) {
+        this.reminderValue = event.target.checked;
+    }
+
+    reminderTypeValue;
+    handleReminderTypeChange(event) {
+        this.reminderTypeValue = event.target.value;
+    }
+
+    handleEventCancel() {
+        this.createNewEvent =false;
+    }
+
+    enableCreateEventButton() {
+        if(this.labelValue===undefined || this.eventStartTimeValue===undefined || this.eventEndTimeValue ===undefined) {
+            this.createEventButtonDisabled =true;
+        } else {
+            this.createEventButtonDisabled =false;
+        }
+    }
+
+    handleEventCreate() {
+            var newEvent = {
+                label: this.labelValue,
+                startTime: this.eventStartTimeValue,
+                endTime: this.eventEndTimeValue,
+                description: this.descriptionValue,
+                additionalInfo: this.additionalInfoValue,
+                reminder: this.reminderValue,
+                reminderType: this.reminderTypeValue,
+            };
+            newTracker({tracker: JSON.stringify(newEvent)})
+                .then(result => {
+                    if(result) {
+                        this.isLoading =true;
+                        setTimeout(() => {
+                            const evt = new ShowToastEvent({
+                                title: 'Record Created Successfully',
+                                variant: 'success',
+                                mode: 'dismissable'
+                            });
+                            this.dispatchEvent(evt);
+                            this.loadCurrentMonthTrackers();
+                            this.fetchselectedDayEvents();
+                            /** 
+                            var newItem = {
+                                trackerId: result, trackerStatus: 'Open', trackerStatusColor: 'background-color: #00BFFF;', 
+                                trackerStartTime: this.eventStartTimeValue, trackerEndTime: this.eventEndTimeValue, trackerLabel: this.labelValue
+                            }
+                            this.selectedDayEvents = [...this.selectedDayEvents, newItem];
+                            */
+                            this.createNewEvent =false;
+                            this.isLoading =false;
+                        }, 1500); 
+                    }
+                })
+                .catch(error => {
+                    this.isLoading =false;
+                    console.log(JSON.stringify(error));
+                    const evt = new ShowToastEvent({
+                        title: 'Error',
+                        message: error.body.message,
+                        variant: 'error',
+                        mode: 'sticky'
+                    });
+                    this.dispatchEvent(evt);
+                })
+    }
+
+}
+--------------------------------------------------------------------------------------------------------------------------------------
+CSS
+--------------------------------------------------------------------------------------------------------------------------------------
+a {
+    text-decoration: none;
+    color: white;
+}
+
+a:hover, a:active {
+  color: #e71354;
+}
+
+.outer {
+	display: grid;
+    grid-template-columns: 67% 33%;
+    padding-left: 1%;
+    grid-template-rows: 10% 90%;
+}
+.headingBar {
+    grid-column: 1/3;
+    grid-row: 1/2;
+	background-color: #E7E7E7;
+    display: grid;
+    grid-template-columns: 2% 5% 2% 2% 3% 2% 15% 69%;
+    gap: 15px;
+    grid-template-rows: 100%;
+}
+.leftIcon {
+    grid-column: 1/2;
+    grid-row: 1/2;
+}
+.currentMonth {
+    color: #e71354;
+    font-weight: bold;
+    font-size: 15px;
+    grid-column: 2/3;
+    grid-row: 1/2;
+}
+.rightIcon {
+    grid-column: 3/4;
+    grid-row: 1/2;
+}
+.minusIcon {
+    grid-column: 4/5;
+    grid-row: 1/2;
+}
+.currentYear {
+    color: #e71354;
+    font-weight: bold;
+    font-size: 15px;
+    grid-column: 5/6;
+    grid-row: 1/2;
+}
+.plusIcon {
+    grid-column: 6/7;
+    grid-row: 1/2;
+}
+.loadCalendarButton {
+    grid-column: 7/8;
+    grid-row: 1/2;
+}
+.loadButton {
+	--slds-c-button-brand-color-background:#101C3C;
+	--slds-c-button-brand-text-color: #98F0A8;
+}
+
+.calendar {
+    font-size: 25px;
+    grid-column: 1/2;
+    grid-row: 2/3;
+    display: grid;
+    grid-template-columns: 15% 14% 14% 14% 14% 14% 15%;
+    grid-template-rows: 10% 18% 18% 18% 18% 18%;
+}
+.sun {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 1/2;
+    grid-row: 1/2;
+}
+.mon {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 2/3;
+    grid-row: 1/2;
+}
+.tue {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 3/4;
+    grid-row: 1/2;
+}
+.wed {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 4/5;
+    grid-row: 1/2;
+}
+.thu {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 5/6;
+    grid-row: 1/2;
+}
+.fri {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 6/7;
+    grid-row: 1/2;
+}
+.sat {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 7/8;
+    grid-row: 1/2;
+}
+.m00 {
+    grid-column: 1/2;
+    grid-row: 2/3;
+}
+.m01 {
+    grid-column: 2/3;
+    grid-row: 2/3;
+}
+.m02 {
+    grid-column: 3/4;
+    grid-row: 2/3;
+}
+.m03 {
+    grid-column: 4/5;
+    grid-row: 2/3;
+}
+.m04 {
+    grid-column: 5/6;
+    grid-row: 2/3;
+}
+.m05 {
+    grid-column: 6/7;
+    grid-row: 2/3;
+}
+.m06 {
+    grid-column: 7/8;
+    grid-row: 2/3;
+}
+.m10 {
+    grid-column: 1/2;
+    grid-row: 3/4;
+}
+.m11 {
+    grid-column: 2/3;
+    grid-row: 3/4;
+}
+.m12 {
+    grid-column: 3/4;
+    grid-row: 3/4;
+}
+.m13 {
+    grid-column: 4/5;
+    grid-row: 3/4;
+}
+.m14 {
+    grid-column: 5/6;
+    grid-row: 3/4;
+}
+.m15 {
+    grid-column: 6/7;
+    grid-row: 3/4;
+}
+.m16 {
+    grid-column: 7/8;
+    grid-row: 3/4;
+}
+.m20 {
+    grid-column: 1/2;
+    grid-row: 4/5;
+}
+.m21 {
+    grid-column: 2/3;
+    grid-row: 4/5;
+}
+.m22 {
+    grid-column: 3/4;
+    grid-row: 4/5;
+}
+.m23 {
+    grid-column: 4/5;
+    grid-row: 4/5;
+}
+.m24 {
+    grid-column: 5/6;
+    grid-row: 4/5;
+}
+.m25 {
+    grid-column: 6/7;
+    grid-row: 4/5;
+}
+.m26 {
+    grid-column: 7/8;
+    grid-row: 4/5;
+}
+.m30 {
+    grid-column: 1/2;
+    grid-row: 5/6;
+}
+.m31 {
+    grid-column: 2/3;
+    grid-row: 5/6;
+}
+.m32 {
+    grid-column: 3/4;
+    grid-row: 5/6;
+}
+.m33 {
+    grid-column: 4/5;
+    grid-row: 5/6;
+}
+.m34 {
+    grid-column: 5/6;
+    grid-row: 5/6;
+}
+.m35 {
+    grid-column: 6/7;
+    grid-row: 5/6;
+}
+.m36 {
+    grid-column: 7/8;
+    grid-row: 5/6;
+}
+.m40 {
+    grid-column: 1/2;
+    grid-row: 6/7;
+}
+.m41 {
+    grid-column: 2/3;
+    grid-row: 6/7;
+}
+.m42 {
+    grid-column: 3/4;
+    grid-row: 6/7;
+}
+.m43 {
+    grid-column: 4/5;
+    grid-row: 6/7;
+}
+.m44 {
+    grid-column: 5/6;
+    grid-row: 6/7;
+}
+.m45 {
+    grid-column: 6/7;
+    grid-row: 6/7;
+}
+.m46 {
+    grid-column: 7/8;
+    grid-row: 6/7;
+}
+.selectedDate {
+    border: 1px solid #E7E7E7;
+    grid-column: 2/3;
+    grid-row: 2/3;
+}
+
+.buttonStyle {
+	--slds-c-button-brand-color-background:#98F0A8;
+	--slds-c-button-brand-text-color: #101C3C;
+}
+
+.newEvent {
+    color: #101C3C;
+    border: 1px solid #E7E7E7;
+    grid-column: 2/3;
+    grid-row: 2/3;
+    display: grid;
+    gap: 5px;
+    grid-template-columns: 50% 50%;
+    grid-template-rows: 5% 4% 8% 4% 8% 4% 15% 4% 15% 4% 8% 15%;
+}
+.heading {
+    color: #98F0A8;
+    font-weight: bold;
+    grid-column: 1/3;
+    grid-row: 1/2;
+}
+.labelLabel {
+    grid-column: 1/2;
+    grid-row: 2/3;
+}
+.eventLabel {
+    grid-column: 1/3;
+    grid-row: 3/4;
+}
+.labelStart {
+    grid-column: 1/2;
+    grid-row: 4/5;
+}
+.eventStartDateTime {
+    grid-column: 1/2;
+    grid-row: 5/6;
+}
+.labelEnd {
+    grid-column: 2/3;
+    grid-row: 4/5;
+}
+.eventEndDateTime {
+    grid-column: 2/3;
+    grid-row: 5/6;
+}
+.labelDescription {
+    grid-column: 1/2;
+    grid-row: 6/7;
+}
+.eventDescription {
+    grid-column: 1/3;
+    grid-row: 7/8;
+}
+.labelAdditionalInfo {
+    grid-column: 1/3;
+    grid-row: 8/9;
+}
+.eventAdditionalInfo {
+    grid-column: 1/3;
+    grid-row: 9/10;
+}
+.labelReminder {
+    grid-column: 1/2;
+    grid-row: 10/11;
+}
+.eventReminder {
+    grid-column: 1/2;
+    grid-row: 11/12;
+}
+.labelReminderType {
+    grid-column: 2/3;
+    grid-row: 10/11;
+}
+.eventReminderType {
+    grid-column: 2/3;
+    grid-row: 11/12;
+}
+.cancelButtons {
+    grid-column: 1/2;
+    grid-row: 12/13;
+}
+.createButtons {
+    grid-column: 2/3;
+    grid-row: 12/13;
+}
+
+.selectedDateHighlightedPanel {
+    padding: 10px !important;
+    display: grid;
+    grid-template-columns: 10% 80% 10%;
+    grid-template-rows: 100%;
+}
+.shortSelectedDay {
+    color: #98F0A8;
+    font-weight: bold;
+    font-size: 25px;
+    grid-column: 1/2;
+    grid-row: 1/2; 
+}
+.addTrackerButton {
+    grid-column: 3/4;
+    grid-row: 1/2; 
+}
+
+.highlightDay {
+    color: #101C3C;
+    background-color: #98F0A8;
+    width: 80%;
+    height: 80%;
+}
+
+.fullWidthAndHeight {
+    min-height: 100% !important;
+    max-height: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+}
+
+.tableDataStatusStyling {
+    padding-left: 5px;
+    color: black;
+    font-weight: bold;
+}
+
+.lightningInputStyling {
+    --slds-c-input-color-background: #101C3C;
+    --slds-c-input-text-color: #98F0A8;
+    --slds-c-checkbox-color-background-checked: #101C3C;
+    --slds-c-checkbox-mark-color-foreground: #98F0A8;
+    --slds-c-textarea-color-background: #101C3C;
+    --slds-c-textarea-text-color: #98F0A8;
+}
+--------------------------------------------------------------------------------------------------------------------------------------

@@ -1,0 +1,60 @@
+--------------------------------------------------------------------------------------------------------------------------------------
+HTML
+--------------------------------------------------------------------------------------------------------------------------------------
+<template>
+    <div style="padding: 15px;background-color: #101C3C;color: #98F0A8;">
+        <div style="padding: 5px;color: #101C3C;">
+            <lightning-input type="number" variant="label-hidden" onchange={handleNumberChange}></lightning-input>
+        </div>
+        <div style="padding: 5px;font-weight: bold;">
+            <span>{textValue}</span>
+        </div>
+    </div>
+</template>
+--------------------------------------------------------------------------------------------------------------------------------------
+JS
+--------------------------------------------------------------------------------------------------------------------------------------
+import { LightningElement } from 'lwc';
+
+export default class Utility extends LightningElement {
+    textValue;
+    singleDigits = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine'];
+    elevenToNinteen = ['Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Ninteen'];
+    twoDigits = ['','Ten','Twenty','Thirty','Fourty','Fifty','Sixty','Seventy','Eighty','Ninty'];
+
+    handleNumberChange(event) {
+        this.textValue = '';
+        let givenNumberToText = Number(event.target.value).toString();
+        let givenNumberToTextLength = givenNumberToText.length;
+        
+        if(givenNumberToTextLength==1) {
+            this.textValue = this.singleDigits[parseInt(givenNumberToText)];
+        } else {
+            if(givenNumberToTextLength==2) {
+                this.textValue = this.twoDigitsHandling(givenNumberToText);
+            } else {
+                if(givenNumberToTextLength==3) {
+                    this.textValue = this.singleDigits[parseInt(givenNumberToText.charAt(0))] +' Hundread ';
+                    if(givenNumberToText.charAt(1)=='0' && givenNumberToText.charAt(2)!='0') {
+                        this.textValue = this.textValue + ' ' + this.singleDigits[parseInt(givenNumberToText.charAt(2))];
+                    } else {
+                        if(!(givenNumberToText.charAt(1)=='0' && givenNumberToText.charAt(2)=='0')) {
+                            this.textValue = this.textValue + ' ' + this.twoDigitsHandling(givenNumberToText.charAt(1)+givenNumberToText.charAt(2));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    twoDigitsHandling(givenNumberToText) {
+        let twoDigitsText ='';
+        if(givenNumberToText.charAt(0)=='1') {
+            twoDigitsText = this.elevenToNinteen[parseInt(givenNumberToText.charAt(1))];
+        } else {
+            twoDigitsText = this.twoDigits[parseInt(givenNumberToText.charAt(0))] + ' ' +  ( (givenNumberToText.charAt(1)!='0') ? this.singleDigits[parseInt(givenNumberToText.charAt(1))] : '' ) ;
+        }
+        return twoDigitsText;
+    }
+}
+--------------------------------------------------------------------------------------------------------------------------------------
